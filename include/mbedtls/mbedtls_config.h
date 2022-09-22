@@ -1505,7 +1505,7 @@
  * Uncomment this macro to enable the support for TLS 1.3.
  *
  */
-//#define MBEDTLS_SSL_PROTO_TLS1_3
+#define MBEDTLS_SSL_PROTO_TLS1_3
 
 /**
  * \def MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE
@@ -1657,6 +1657,47 @@
 #define MBEDTLS_SSL_SERVER_NAME_INDICATION
 
 /**
+ * \def MBEDTLS_SSL_TLS_CERT_TYPE
+ *
+ * Enable support for exchanging alternative credential types.
+ * 
+ * Comment this macro to disable support for the client and server
+ * certificate type extension.
+ */
+#define MBEDTLS_SSL_TLS_CERT_TYPE
+
+/**
+ * \def MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT
+ *
+ * Enable support for EAT as a credential type for
+ * attestation.
+ * 
+ * Comment this macro to disable support EAT-based
+ * attestation.
+ */
+#define MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT
+
+/**
+ * \def MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX
+ *
+ * Defines the maximum size of the nonce provided by
+ * the server.
+ */
+
+#define MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX   32
+
+/**
+ * \def MBEDTLS_SSL_TLS_CERT_TYPE_RPK
+ *
+ * Enable support for raw public keys as a credential
+ * type.
+ * 
+ * Comment this macro to disable support RPK-based
+ * credentials.
+ */
+#define MBEDTLS_SSL_TLS_CERT_TYPE_RPK
+
+/**
  * \def MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH
  *
  * When this option is enabled, the SSL buffer will be resized automatically
@@ -1767,7 +1808,7 @@
  *
  * Uncomment this to enable internal use of PSA Crypto and new associated APIs.
  */
-//#define MBEDTLS_USE_PSA_CRYPTO
+#define MBEDTLS_USE_PSA_CRYPTO
 
 /**
  * \def MBEDTLS_PSA_CRYPTO_CONFIG

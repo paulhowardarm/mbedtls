@@ -607,6 +607,10 @@ struct mbedtls_ssl_handshake_params
     mbedtls_dhm_context dhm_ctx;                /*!<  DHM key exchange        */
 #endif
 
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+   uint8_t client_cert_format;                 /*!<  client certificate format        */
+#endif
+
 /* Adding guard for MBEDTLS_ECDSA_C to ensure no compile errors due
  * to guards in client and server code. There is a gap in functionality that
  * access to ecdh_ctx structure is needed for MBEDTLS_ECDSA_C which does not
@@ -1766,6 +1770,10 @@ int mbedtls_ssl_tls13_write_certificate( mbedtls_ssl_context *ssl );
  * Handler of TLS 1.3 write Certificate Verify message
  */
 int mbedtls_ssl_tls13_write_certificate_verify( mbedtls_ssl_context *ssl );
+
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+int mbedtls_ssl_tls13_write_certificate_verify_eat( mbedtls_ssl_context *ssl );
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
 
 #endif /* MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED */
 

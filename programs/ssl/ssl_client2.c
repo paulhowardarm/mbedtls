@@ -258,6 +258,14 @@ int main( void )
 #define USAGE_ALPN ""
 #endif /* MBEDTLS_SSL_ALPN */
 
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+#define USAGE_CLIENT_CERT_TYPE \
+    "    client_cert_type=%%s             default: \"\" (disabled)\n"   \
+    "                                     example: eat,x509\n"
+#else
+#define USAGE_CLIENT_CERT_TYPE "x509"
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+
 #if defined(MBEDTLS_ECP_C)
 #define USAGE_CURVES \
     "    curves=a,b,c,d      default: \"default\" (library default)\n"  \
@@ -444,9 +452,10 @@ int main( void )
     USAGE_SERIALIZATION                                                       \
     " acceptable ciphersuite names:\n"
 
-#define ALPN_LIST_SIZE    10
-#define CURVE_LIST_SIZE   20
-#define SIG_ALG_LIST_SIZE  5
+#define ALPN_LIST_SIZE              10
+#define CURVE_LIST_SIZE             20
+#define SIG_ALG_LIST_SIZE            5
+#define CLIENT_CERT_TYPE_LIST_SIZE   3
 
 /*
  * global options
@@ -534,6 +543,7 @@ struct options
     const char *mki;            /* The dtls mki value to use                */
     const char *key_opaque_alg1; /* Allowed opaque key alg 1                */
     const char *key_opaque_alg2; /* Allowed Opaque key alg 2                */
+    const char *client_cert_type_string; /* list of client certificate types */
 } opt;
 
 #include "ssl_test_common_source.c"
@@ -664,6 +674,19 @@ int main( int argc, char *argv[] )
     mbedtls_net_context server_fd;
     io_ctx_t io_ctx;
 
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_PSA_CRYPTO_C)
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+
+//    psa_status_t status;
+    psa_key_handle_t key_handle = 0;
+
+    const uint8_t key_bytes[] = {
+         0x49, 0xc9, 0xa8, 0xc1, 0x8c, 0x4b, 0x88, 0x56, 0x38, 0xc4, 0x31, 0xcf,
+         0x1d, 0xf1, 0xc9, 0x94, 0x13, 0x16, 0x09, 0xb5, 0x80, 0xd4, 0xfd, 0x43,
+         0xa0, 0xca, 0xb1, 0x7d, 0xb2, 0xf1, 0x3e, 0xee
+    };
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_PSA_CRYPTO_C */
+
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) && \
     defined(MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED)
     uint16_t sig_alg_list[SIG_ALG_LIST_SIZE];
@@ -712,6 +735,13 @@ int main( int argc, char *argv[] )
 #elif defined(MBEDTLS_SSL_PROTO_TLS1_3)
     psa_status_t status;
 #endif
+
+
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+    /* list of client certificate types */
+    uint8_t client_cert_type_list[CLIENT_CERT_TYPE_LIST_SIZE];
+    char *start;
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
 
 #if defined(MBEDTLS_X509_CRT_PARSE_C)
     mbedtls_x509_crt_profile crt_profile_for_test = mbedtls_x509_crt_profile_default;
@@ -782,6 +812,10 @@ int main( int argc, char *argv[] )
 #if defined(MBEDTLS_SSL_ALPN)
     memset( (void * ) alpn_list, 0, sizeof( alpn_list ) );
 #endif
+
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+    memset( (void *) client_cert_type_list, MBEDTLS_TLS_CERT_TYPE_NONE, sizeof( client_cert_type_list ) );
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
 
 #if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
     status = psa_crypto_init();
@@ -1141,6 +1175,10 @@ int main( int argc, char *argv[] )
             else goto usage;
         }
 #endif /* MBEDTLS_SSL_PROTO_TLS1_3 */
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+        else if( strcmp( p, "client_cert_type" ) == 0 )
+            opt.client_cert_type_string = q;
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
         else if( strcmp( p, "min_version" ) == 0 )
         {
             if( strcmp( q, "tls12" ) == 0 ||
@@ -1609,6 +1647,40 @@ int main( int argc, char *argv[] )
     }
 #endif /* MBEDTLS_SSL_ALPN */
 
+
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+    if( opt.client_cert_type_string != NULL )
+    {
+        p = (char *)opt.client_cert_type_string;
+        i = 0;
+        start = p;
+
+        /* Leave room for a final NULL in client_cert_type_list */
+        while( i < CLIENT_CERT_TYPE_LIST_SIZE - 1 && *p != '\0' )
+        {
+            while( *p != ',' && *p != '\0' )
+                p++;
+
+            if( *p == ',' || *p == '\0' )
+            {
+
+                if( *p == ',' )
+                    *p++ = '\0';
+
+                /* Not all certificate types are supported */
+                if( strcmp( start, "eat" ) == 0 )
+                    client_cert_type_list[i++] = MBEDTLS_TLS_CERT_TYPE_EAT;
+                else if( strcmp( start, "x509" ) == 0 )
+                    client_cert_type_list[i++] = MBEDTLS_TLS_CERT_TYPE_X509;
+                else goto usage;
+                start = p;
+            }
+        }
+
+        if( i == 0 ) goto usage;
+    }
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+
     /*
      * 0. Initialize the RNG and the session data
      */
@@ -1932,6 +2004,35 @@ int main( int argc, char *argv[] )
         }
     }
 #endif  /* MBEDTLS_X509_CRT_PARSE_C */
+
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+    if( client_cert_type_list[0] != MBEDTLS_TLS_CERT_TYPE_NONE ) {
+        mbedtls_ssl_conf_client_cert_type(&conf, client_cert_type_list);
+
+#if defined(MBEDTLS_PSA_CRYPTO_C)
+/*        status = psa_crypto_init( );
+        if( status != PSA_SUCCESS )
+        {
+            printf( "psa_crypto_init failed\n" );
+            return( EXIT_FAILURE );
+        }
+*/
+        psa_set_key_usage_flags( &attributes,
+                                 PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH );
+        psa_set_key_algorithm( &attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256) );
+        psa_set_key_type( &attributes, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1) );
+
+        status = psa_import_key( &attributes, key_bytes, sizeof( key_bytes ), &key_handle );
+        if( status != PSA_SUCCESS )
+        {
+            ret = MBEDTLS_ERR_SSL_PRIVATE_KEY_REQUIRED;
+            goto exit;
+        }
+
+        mbedtls_ssl_conf_client_rpk(&conf, &key_handle);
+#endif /* MBEDTLS_PSA_CRYPTO_C */
+    }
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
 
 #if defined(MBEDTLS_ECP_C)
     if( opt.curves != NULL &&
@@ -3068,6 +3169,12 @@ exit:
         mbedtls_printf("Last error was: -0x%X - %s\n\n", (unsigned int) -ret, error_buf );
     }
 #endif
+
+    
+#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+    /* Destroy private key. */
+    psa_destroy_key( key_handle );
+#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
 
     mbedtls_net_free( &server_fd );
 
