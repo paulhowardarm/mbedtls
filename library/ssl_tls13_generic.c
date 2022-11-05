@@ -426,7 +426,7 @@ static int ssl_tls13_write_eat_write( mbedtls_ssl_context *ssl,
 
     i += 3;
 
-    status = create_kat_bundle(*ssl->conf->client_rpk,
+    status = parsec_attest_key( *ssl->conf->client_rpk,
                                 0,
                                 ssl->session_negotiate->srv_nonce,
                                 ssl->session_negotiate->srv_nonce_len,
@@ -542,8 +542,8 @@ static int ssl_tls13_parse_eat( mbedtls_ssl_context *ssl,
         if( ssl->conf->f_attestation_nonce == NULL )
             return( MBEDTLS_ERR_SSL_DECODE_ERROR );
 
-        /* TBD: Decide whether the nonce stored in the
-        * session state should be used in instead.
+        /* TBD: Decide whether to store the nonce in
+        * session state rather than in the application.
         * (see ssl->session_negotiate->srv_nonce).
         */
         ret = ssl->conf->f_attestation_nonce( NULL, ssl,
@@ -557,7 +557,15 @@ static int ssl_tls13_parse_eat( mbedtls_ssl_context *ssl,
             return( MBEDTLS_ERR_SSL_DECODE_ERROR );
         }
 
-        ret = ssl->conf->a_vrfy(NULL, p, cert_data_len, nonce, nonce_len, crt, &crt_len);
+        /* Callback into the verifier function provided by the application */
+        ret = ssl->conf->a_vrfy( NULL,                   // session data
+                                 (uint8_t *) p,          // KAT bundle
+                                 cert_data_len,          // KAT bundle length
+                                 nonce,                  // Nonce
+                                 nonce_len,              // Nonce length
+                                 crt,                    // IK public key
+                                 &crt_len);              // IK public key length
+
         if( ret != 0 )
         {
             MBEDTLS_SSL_DEBUG_MSG( 1, ( "bad Certificate message" ) );

@@ -67,36 +67,17 @@ static const uint8_t pak_private_key_521[] = {PAK_PRIVATE_KEY_secp521r1};
 #define EAT_KEY_TYPE_KAK 0
 #define EAT_KEY_TYPE_PAK 1
 
-enum t_cose_err_t fetch_key(uint8_t            key_type,
-                            int32_t            cose_algorithm_id,
-                            struct t_cose_key *key_pair);
-
-int32_t
-ctoken_decode_claim(struct ctoken_decode_ctx *me,
-                    int label,
-                    uint8_t type,
-                    struct q_useful_buf_c    *content);
-
-int32_t
-ctoken_encode_claim(struct ctoken_encode_ctx *me,
-                    int label,
-                    uint8_t type,
-                    struct q_useful_buf_c    *content);
-
-psa_status_t create_kat_bundle(psa_key_id_t ik,         // public key of the identity key is included in KAT
-                        parsec_attest_mechanism_t mech, // mechanism
-                        const uint8_t *nonce,           // nonce
-                        size_t nonce_len,               // nonce length
-                        uint8_t *kat_bundle,            // KAT Bundle buffer
-                        size_t kat_bundle_size,         // KAT Bundle buffer length (input)
-                        size_t *kat_bundle_len);        // KAT Bundle length (output)
+psa_status_t parsec_attest_key( psa_key_id_t ik,                // public key of the identity key
+                                parsec_attest_mechanism_t mech, // attestation mechanism
+                                const uint8_t *nonce,           // nonce
+                                size_t nonce_len,               // nonce length
+                                uint8_t *kat_bundle,            // KAT Bundle buffer
+                                size_t kat_bundle_size,         // KAT Bundle buffer length (input)
+                                size_t *kat_bundle_len);        // KAT Bundle length (output)
 
 int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
-                    const uint8_t *nonce, size_t nonce_len,
-                    struct t_cose_key *pak,
-                    struct t_cose_key *kak,
-                    uint8_t *ik_pub, size_t ik_pub_len,
-                    size_t *ik_pub_size);
-
+                           const uint8_t *nonce, size_t nonce_len,
+                           uint8_t *ik_pub, size_t ik_pub_len,
+                           size_t *ik_pub_size);
 
 #endif /* MBEDTLS_SSL_EAT_H */

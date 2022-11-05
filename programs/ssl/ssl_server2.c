@@ -728,36 +728,15 @@ static int my_verify( void *data,
                       uint8_t *nonce, size_t nonce_len,
                       uint8_t *ik_pub, size_t *ik_pub_len)
 {
-    int ret = 0;
-    struct t_cose_key pak;
-    struct t_cose_key kak;
-    psa_status_t status;
- 
+    int ret = 0; 
     ((void) data);
 
-    mbedtls_printf( "\nVerification of KAT-Bundle requested: %d\n", kat_bundle_len );
+    mbedtls_printf( "\nVerification of KAT-Bundle requested\n");
 
-    status = fetch_key(EAT_KEY_TYPE_PAK, T_COSE_ALGORITHM_ES256, &pak);
-
-    if( status != PSA_SUCCESS )
-        return( -1 );
-
-    status = fetch_key(EAT_KEY_TYPE_KAK, T_COSE_ALGORITHM_ES256, &kak);
-
-    if( status != PSA_SUCCESS ) {
-        psa_close_key( (psa_key_handle_t) pak.k.key_handle);
-        return( -1 );
-    }
-
-    /* Here we would do a call to Veraison */
+    /* TBD: Call to Veraison goes in here. */
     ret = verify_kat_bundle( kat_bundle, kat_bundle_len,
-                      nonce, nonce_len,
-                      &pak,
-                      &kak,
-                      ik_pub, *ik_pub_len, ik_pub_len);
-
-    psa_close_key( (psa_key_handle_t) pak.k.key_handle);
-    psa_close_key( (psa_key_handle_t) kak.k.key_handle);
+                             nonce, nonce_len,
+                             ik_pub, *ik_pub_len, ik_pub_len);
 
     return( ret );
 }

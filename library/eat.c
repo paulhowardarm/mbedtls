@@ -42,7 +42,6 @@
 
 
 /* Function signatures */
-
 int32_t create_eat( uint8_t *ptr, size_t *len, const uint8_t *nonce, size_t nonce_len, struct t_cose_key *key_pair );
 
 int32_t verify_eat( uint8_t *ptr, size_t len, const uint8_t *nonce, size_t nonce_len, struct t_cose_key *key_pair );
@@ -60,6 +59,11 @@ int32_t kat_encode(struct t_cose_key signing_key,
                    struct q_useful_buf output_buffer,
                    struct q_useful_buf_c *completed_token);
 
+
+enum t_cose_err_t fetch_key(uint8_t            key_type,
+                            int32_t            cose_algorithm_id,
+                            struct t_cose_key *key_pair);
+
 int32_t
 ctoken_decode_claim(struct ctoken_decode_ctx *me,
                     int label,
@@ -70,7 +74,7 @@ int32_t
 ctoken_encode_claim(struct ctoken_encode_ctx *me,
                     int label,
                     uint8_t type,
-                    struct q_useful_buf_c    content);  
+                    struct q_useful_buf_c    content); 
 
 void free_psa_ecdsa_key_pair(struct t_cose_key key_pair);
 
@@ -85,22 +89,22 @@ void free_psa_ecdsa_key_pair(struct t_cose_key key_pair);
 static void print_useful_buf(const char *string_label, struct q_useful_buf_c buf)
 {
     if(string_label) {
-        printf("%s", string_label);
+        mbedtls_printf("%s", string_label);
     }
 
-    printf("    %ld bytes\n", buf.len);
+    mbedtls_printf("    %ld bytes\n", buf.len);
 
-    printf("    ");
+    mbedtls_printf("    ");
 
     size_t i;
     for(i = 0; i < buf.len; i++) {
         uint8_t Z = ((uint8_t *)buf.ptr)[i];
-        printf("%02x ", Z);
+        mbedtls_printf("%02x ", Z);
         if((i % 32) == 31) {
-            printf("\n    ");
+            mbedtls_printf("\n    ");
         }
     }
-    printf("\n");
+    mbedtls_printf("\n");
 
     fflush(stdout);
 }
@@ -168,45 +172,14 @@ int32_t create_kat( const uint8_t *nonce,   // nonce
 }
 
 
+psa_status_t parsec_attest_key( psa_key_id_t ik,                // public key of the identity key
+                                parsec_attest_mechanism_t mech, // attestation mechanism
+                                const uint8_t *nonce,           // nonce
+                                size_t nonce_len,               // nonce length
+                                uint8_t *kat_bundle,            // KAT Bundle buffer
+                                size_t kat_bundle_size,         // KAT Bundle buffer length (input)
+                                size_t *kat_bundle_len)         // KAT Bundle length (output)
 
-/**
- * \file t_cose_basic_example_psa.c
- *
- * \brief Example code for signing and verifying a COSE_Sign1 message using PSA
- *
- * This file has simple code to sign a payload and verify it.
- *
- * This works with PSA / MBed Crypto. It assumes t_cose has been wired
- * up to PSA / MBed Crypto and has code specific to this library to
- * make a key pair that will be passed through t_cose. See t_cose
- * README for more details on how integration with crypto libraries
- * works.
- */
-
-/* Here's the auto-detect and manual override logic for managing PSA
- * Crypto API compatibility. It is needed here for key generation.
- *
- * PSA_GENERATOR_UNBRIDLED_CAPACITY happens to be defined in MBed
- * Crypto 1.1 and not in MBed Crypto 2.0 so it is what auto-detect
- * hinges off of.
- *
- * T_COSE_USE_PSA_CRYPTO_FROM_MBED_CRYPTO20 can be defined to force
- * setting to MBed Crypto 2.0
- *
- * T_COSE_USE_PSA_CRYPTO_FROM_MBED_CRYPTO11 can be defined to force
- * setting to MBed Crypt 1.1. It is also what the code below hinges
- * on.
- */
-#if defined(PSA_GENERATOR_UNBRIDLED_CAPACITY) && !defined(T_COSE_USE_PSA_CRYPTO_FROM_MBED_CRYPTO20)
-#define T_COSE_USE_PSA_CRYPTO_FROM_MBED_CRYPTO11
-#endif
-psa_status_t create_kat_bundle(psa_key_id_t ik,         // public key of the identity key is included in KAT
-                        parsec_attest_mechanism_t mech,
-                        const uint8_t *nonce,
-                        size_t nonce_len,
-                        uint8_t *kat_bundle,
-                        size_t kat_bundle_size,
-                        size_t *kat_bundle_len)
 {
     enum t_cose_err_t return_value;
     uint8_t *pat[1000]={0};
@@ -220,8 +193,7 @@ psa_status_t create_kat_bundle(psa_key_id_t ik,         // public key of the ide
     size_t ik_pk_len;
     uint8_t hash[PSA_HASH_MAX_SIZE];
     memset( hash,0,sizeof( hash ) );
-    size_t hash_size;
-    hash_size = 0;
+    size_t hash_size = 0;
 
     switch( mech )
     {
@@ -416,13 +388,11 @@ enum t_cose_err_t fetch_key(uint8_t            key_type,
             return T_COSE_ERR_UNSUPPORTED_SIGNING_ALG;
     }
 
-
     /* OK to call this multiple times */
     crypto_result = psa_crypto_init();
     if(crypto_result != PSA_SUCCESS) {
         return T_COSE_ERR_FAIL;
     }
-
 
     /* When importing a key with the PSA API there are two main things
      * to do.
@@ -745,33 +715,30 @@ int32_t kat_verify(struct t_cose_key     kak,
      * The algorithm in use comes from the header in the token
      * so it is not specified here
      */
-    ctoken_decode_init(&decode_context,
-                       0,
-                       0,
-                       CTOKEN_PROTECTION_BY_TAG);
+    ctoken_decode_init( &decode_context,
+                        0,
+                        0,
+                        CTOKEN_PROTECTION_BY_TAG );
 
-    /* Set the verification key to use. It must be a key that works
-     * with the algorithm the token was signed with. (This can be
-     * be retrieved, but it is not shown here.)
-     */
-    ctoken_decode_set_verification_key(&decode_context, kak);
+    /* Set the verification key to use. */
+    ctoken_decode_set_verification_key( &decode_context, kak );
 
     /* Validate the signature on the token */
-    ctoken_decode_validate_token(&decode_context, kat);
+    ctoken_decode_validate_token( &decode_context, kat );
 
     /* Obtain nonce */
-    result_value = ctoken_decode_claim(&decode_context, CTOKEN_EAT_LABEL_NONCE, CLAIM_TYPE_BSTR, nonce);
+    result_value = ctoken_decode_claim( &decode_context, CTOKEN_EAT_LABEL_NONCE, CLAIM_TYPE_BSTR, nonce);
     if( result_value != 0) return( result_value );
 
     /* Obtain IK public key */
-    result_value = ctoken_decode_claim(&decode_context, CTOKEN_LABEL_CNF, CLAIM_TYPE_BSTR, ik_pub);
+    result_value = ctoken_decode_claim( &decode_context, CTOKEN_LABEL_CNF, CLAIM_TYPE_BSTR, ik_pub);
     if( result_value != 0) return( result_value );
 
     /* Obtain KAK public key */
-    result_value = ctoken_decode_claim(&decode_context, CTOKEN_TEMP_LABEL_KAK_PUB, CLAIM_TYPE_BSTR, kak_pub);
+    result_value = ctoken_decode_claim( &decode_context, CTOKEN_TEMP_LABEL_KAK_PUB, CLAIM_TYPE_BSTR, kak_pub);
     if( result_value != 0) return( result_value );
 
-    return ctoken_decode_get_and_reset_error(&decode_context);
+    return ctoken_decode_get_and_reset_error( &decode_context);
 }
 
 int32_t
@@ -833,31 +800,26 @@ ctoken_encode_claim(struct ctoken_encode_ctx *me,
 
 int32_t create_eat( uint8_t *ptr, size_t *len, const uint8_t *nonce, size_t nonce_len, struct t_cose_key *key_pair)
 {
-    int return_value;
-
-    /* ------   Make an EAT   ------ */
-
     /* Call to macro to make a 500 byte struct useful_buf on the stack
      * named token_buffer. The expected token is less than 200 bytes.
      */
-    MakeUsefulBufOnStack(  token_buffer, 500);
-    struct q_useful_buf_c  completed_token;
+    MakeUsefulBufOnStack( token_buffer, 500 );
+    struct q_useful_buf_c completed_token;
+    int return_value;
 
     /* Make the token */
-    return_value = eat_encode(*key_pair,
-                              (struct q_useful_buf_c)
-                              {
-                                .len = nonce_len,
-                                .ptr = nonce
-                              },
-                              token_buffer,
-                             &completed_token);
+    return_value = eat_encode( *key_pair,
+                               ( struct q_useful_buf_c )
+                               {
+                                 .len = nonce_len,
+                                 .ptr = nonce
+                               },
+                               token_buffer,
+                               &completed_token);
 
-    if(return_value) {
+    if( return_value ) {
         return (return_value);
     }
-
-    print_useful_buf("EAT:\n", completed_token);
 
     *len = completed_token.len;
 
@@ -870,41 +832,30 @@ int32_t verify_eat( uint8_t *ptr, size_t len, const uint8_t *nonce, size_t nonce
 {
     struct q_useful_buf_c completed_token;
     struct q_useful_buf_c decoded_nonce;
-
     int return_value;
 
     completed_token.len = len;
     completed_token.ptr = ptr;
 
-    /* ------   Verify the EAT   ------ */
-
-    print_useful_buf("Received EAT:\n", completed_token);
-
-    return_value = eat_decode(*key_pair,
+    return_value = eat_decode( *key_pair,
                               completed_token,
-                              &decoded_nonce);
+                               &decoded_nonce);
 
-    printf("EAT Verification complete: %d (%s)\n", return_value, return_value ? "fail" : "success");
-    if (return_value) {
-        return(return_value);
+    if( return_value != 0 ) {
+        return( return_value );
     }
 
-    print_useful_buf("Decoded nonce:\n", decoded_nonce);
-
-    if (memcmp(decoded_nonce.ptr,nonce,nonce_len )!=0)
+    if( memcmp( decoded_nonce.ptr, nonce, nonce_len ) != 0 )
     {
-        printf("Nonce values do not match!\n");
-        return(CTOKEN_ERR_TAMPERING_DETECTED);
+        return( CTOKEN_ERR_TAMPERING_DETECTED );
     }
 
-    return(return_value);
+    return( return_value );
 }
 
 
 int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
                     const uint8_t *nonce, size_t nonce_len,
-                    struct t_cose_key *pak,
-                    struct t_cose_key *kak,
                     uint8_t *ik_pub, size_t ik_pub_len,
                     size_t *ik_pub_size)
 {
@@ -914,12 +865,27 @@ int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
     struct q_useful_buf_c kat;
     struct q_useful_buf_c pat;
     struct q_useful_buf_c hash_ik_pub_struct;
+    struct t_cose_key pak;
+    struct t_cose_key kak;
 
     int return_value;
     psa_status_t status;
+
     uint8_t hash_ik_pub[PSA_HASH_MAX_SIZE];
     memset( hash_ik_pub,0,sizeof( hash_ik_pub ) );
     size_t hash_ik_pub_len;
+
+    status = fetch_key(EAT_KEY_TYPE_PAK, T_COSE_ALGORITHM_ES256, &pak);
+
+    if( status != PSA_SUCCESS )
+        return( -1 );
+
+    status = fetch_key(EAT_KEY_TYPE_KAK, T_COSE_ALGORITHM_ES256, &kak);
+
+    if( status != PSA_SUCCESS ) {
+        free_psa_ecdsa_key_pair( pak );
+        return( -1 );
+    }
 
     /* Extract KAT */
     kat.len = MBEDTLS_GET_UINT16_BE( kat_bundle, 1 );
@@ -930,21 +896,24 @@ int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
     pat.ptr = &kat_bundle[1 + 2 + kat.len + 2];
 
     /* Verify the KAT */
-    // TBD: Was cwt_decode
-    return_value = kat_verify(*kak,
-                              kat,
+    return_value = kat_verify( kak,
+                               kat,
                               &decoded_nonce,
                               &decoded_ik_pub,
-                              &decoded_kak_pub);
+                               &decoded_kak_pub);
 
-    if (return_value) {
-        return(return_value);
+    if( return_value ) {
+        free_psa_ecdsa_key_pair( pak );
+        free_psa_ecdsa_key_pair( kak );
+        return( return_value );
     }
 
     /* Check nonce */
     if ( memcmp(decoded_nonce.ptr, nonce, nonce_len) != 0 )
     {
-        return(CTOKEN_ERR_TAMPERING_DETECTED);
+        free_psa_ecdsa_key_pair( pak );
+        free_psa_ecdsa_key_pair( kak );
+        return( CTOKEN_ERR_TAMPERING_DETECTED );
     }
 
     /* Hash IK pub */
@@ -954,6 +923,8 @@ int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
                                &hash_ik_pub_len );
     if( status != PSA_SUCCESS )
     {
+        free_psa_ecdsa_key_pair( pak );
+        free_psa_ecdsa_key_pair( kak );
         return( status );
     }
 
@@ -961,24 +932,28 @@ int32_t verify_kat_bundle( uint8_t *kat_bundle, size_t kat_bundle_len,
     hash_ik_pub_struct.ptr = hash_ik_pub;
 
     /* Verify the PAT */
-    // TBD: Was eat_decode
-    return_value = pat_verify(*pak,
-                              pat,
-                              &hash_ik_pub_struct);
+    return_value = pat_verify( pak,
+                               pat,
+                               &hash_ik_pub_struct );
 
-    if (return_value) {
-        return(return_value);
+    if( return_value != CTOKEN_ERR_SUCCESS ) {
+        free_psa_ecdsa_key_pair( pak );
+        free_psa_ecdsa_key_pair( kak );
+        return( return_value );
     }
 
-    if (decoded_ik_pub.len > ik_pub_len) {
+    if( decoded_ik_pub.len > ik_pub_len ) {
+        free_psa_ecdsa_key_pair( pak );
+        free_psa_ecdsa_key_pair( kak );
         return(CTOKEN_ERR_INSUFFICIENT_MEMORY);
     }
 
     /* Return IK public key */
     *ik_pub_size = decoded_ik_pub.len;
-    memcpy(ik_pub,decoded_ik_pub.ptr,decoded_ik_pub.len);
+    memcpy( ik_pub,decoded_ik_pub.ptr,decoded_ik_pub.len );
 
-    return(return_value);
+    free_psa_ecdsa_key_pair( pak );
+    free_psa_ecdsa_key_pair( kak );
+
+    return( return_value );
 }
-
-
