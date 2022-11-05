@@ -95,138 +95,100 @@ static int ssl_tls13_parse_supported_versions_ext( mbedtls_ssl_context *ssl,
     return( 0 );
 }
 
-
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-/*
- * mbedtls_tls13_parse_certificate_type_client():
- *
- * Figure 4, RFC 7250 (Using Raw Public Keys in TLS/DTLS)
- *
- *   struct {
- *           select(ClientOrServerExtension) {
- *               case client:
- *                 CertificateType client_certificate_types<1..2^8-1>;
- *               case server:
- *                 CertificateType client_certificate_type;
- *           }
- *   } ClientCertTypeExtension;
- *
- *   struct {
- *           select(ClientOrServerExtension) {
- *               case client:
- *                 CertificateType server_certificate_types<1..2^8-1>;
- *               case server:
- *                 CertificateType server_certificate_type;
- *           }
- *   } ServerCertTypeExtension;
- */
-static int mbedtls_tls13_parse_client_cert_type_server_ext( mbedtls_ssl_context *ssl,
-                                                            const unsigned char *buf,
-                                                            const unsigned char *end )
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+static int mbedtls_tls13_parse_client_evidence_proposal_server_ext( mbedtls_ssl_context *ssl,
+                                                        const unsigned char *buf,
+                                                        const unsigned char *end )
 {
     size_t list_size;
-    const unsigned char *p = buf;
-    const unsigned char *list_end;
-    uint8_t cert_type;
+    const unsigned char *p;
+    uint16_t value;
 
-    MBEDTLS_SSL_DEBUG_MSG( 3, ( "parse ClientCertType extension" ) );
+    MBEDTLS_SSL_CHK_BUF_READ_PTR( buf, end, 4 );
 
-    MBEDTLS_SSL_CHK_BUF_READ_PTR( p, end, 2 );
-    list_size = p[0];
-    p++;
+    list_size = buf[0];
 
-    MBEDTLS_SSL_CHK_BUF_READ_PTR( p, end, list_size );
-    list_end = p + list_size;
-
-    while( p < list_end )
+    p = buf + 1;
+    while( list_size > 0 )
     {
-        cert_type = p[0];
+        MBEDTLS_SSL_CHK_BUF_READ_PTR( p, end, 3 );
 
-        if( cert_type == MBEDTLS_TLS_CERT_TYPE_CWT ||
-            cert_type == MBEDTLS_TLS_CERT_TYPE_EAT ||
-            cert_type == MBEDTLS_TLS_CERT_TYPE_1609Dot2 ||
-            cert_type == MBEDTLS_TLS_CERT_TYPE_RPK ||
-            cert_type == MBEDTLS_TLS_CERT_TYPE_OpenPGP ||
-            cert_type == MBEDTLS_TLS_CERT_TYPE_X509 )
+        /* Only numeric content type implemented */
+        if( p[0] == 0 )
         {
-            /* Out of all the certificate types, we only support X.509 and EAT */
-            if( cert_type == MBEDTLS_TLS_CERT_TYPE_X509 ||
-                cert_type == MBEDTLS_TLS_CERT_TYPE_EAT )
+            value = (uint16_t) MBEDTLS_GET_UINT16_BE( p, 1 );
+            if( value == MBEDTLS_TLS_ATTESTATION_TYPE_EAT )
             {
-                ssl->handshake->client_cert_format = cert_type;
-                MBEDTLS_SSL_DEBUG_MSG( 4, ( "client certificate format selected: %d", cert_type ) );
+                ssl->handshake->client_attestation_format = value;
+
+                MBEDTLS_SSL_DEBUG_MSG( 4, ( "client attestation format selected: %d", value ) );
                 return( 0 );
             }
         }
-        p++;
+        p+=3;
+
+        list_size-=3;
     }
 
-    /* Unsupported certificate type */
-    MBEDTLS_SSL_DEBUG_MSG( 1, ( "No certificate type in common" ) );
-    MBEDTLS_SSL_PEND_FATAL_ALERT( MBEDTLS_SSL_ALERT_MSG_ILLEGAL_PARAMETER,
-                                  MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE );
-    return( MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE );
+    ssl->handshake->client_attestation_format = MBEDTLS_TLS_ATTESTATION_TYPE_NONE;
+    return( 0 );
 }
 
-static int ssl_tls13_write_client_cert_type_server_ext( mbedtls_ssl_context *ssl,
+static int ssl_tls13_write_evidence_proposal_server_ext( mbedtls_ssl_context *ssl,
                                                         unsigned char *buf,
                                                         size_t buflen,
                                                         size_t *olen )
 {
     unsigned char *p = buf;
-    int ret;
-    uint8_t nonce[MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX];
-    size_t nonce_len = sizeof( nonce );
+    unsigned char *end = buf + buflen;
+    unsigned char *start = buf;
+
+    uint8_t nonce[8]={0,1,2,3,4,5,6,7};
 
     *olen = 0;
 
     MBEDTLS_SSL_DEBUG_MSG( 3,
-        ( "encrypted extensions, adding client certificate type extension" ) );
+        ( "encrypted extensions, adding evidence proposal extension" ) );
 
-    if( buflen < 5 )
-    {
-        MBEDTLS_SSL_DEBUG_MSG( 1, ( "buffer too small" ) );
-        return( MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL );
-    }
+    /* Check if we have space for the extension header,
+     * the extension length field and a minimal evidence proposal:
+     * - extension_type                  (2 bytes)
+     * - extension_data_length           (2 bytes)
+     * - encodingType                    (1 byte)
+     * - content_format                  (2 bytes)
+     * - nonce length                    (1 byte)
+     * - nonce (variable length)         (0 - 255 bytes)
+     */
+    MBEDTLS_SSL_CHK_BUF_PTR( p, end, 8);
 
-    MBEDTLS_PUT_UINT16_BE( MBEDTLS_TLS_EXT_CLI_CERT_TYPE, p, 0 );
-
-    if( ssl->conf->f_attestation_nonce == NULL )
-        return( MBEDTLS_ERR_SSL_BAD_INPUT_DATA );
-
-    ret = ssl->conf->f_attestation_nonce( NULL, ssl,
-                                          nonce, &nonce_len );
-
-    if( ret != 0 )
-    {
-        MBEDTLS_SSL_DEBUG_MSG( 1, ( "failed to fetch the nonce" ) );
-        MBEDTLS_SSL_PEND_FATAL_ALERT( MBEDTLS_SSL_ALERT_MSG_DECODE_ERROR,
-                                        MBEDTLS_ERR_SSL_DECODE_ERROR );
-        return( MBEDTLS_ERR_SSL_DECODE_ERROR );
-    }
-
-    /* write length */
-    MBEDTLS_PUT_UINT16_BE( 1 + nonce_len, p, 2 );
-
+    /* Jump past the extension type and extension data length field */
     p += 4;
 
-    /* write CertificateType */
-    /* TBD: Make certificate handling configurable */
-    *p++ = 5;
+    /* write encoding type */
+    *p++ = 0;
 
-    if( buflen < nonce_len )
-    {
-        MBEDTLS_SSL_DEBUG_MSG( 1, ( "buffer too small" ) );
-        return( MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL );
-    }
+    /* write attestation type */
+    MBEDTLS_PUT_UINT16_BE( ssl->handshake->client_attestation_format, p, 0 );
+    p+=2;
 
-    memcpy( p, nonce, nonce_len );
+    /* write nonce length */
+    *p++ = sizeof( nonce );
 
-    *olen = 5 + nonce_len;
+    /* write nonce */
+    memcpy( p, nonce, sizeof( nonce ) );
+    p+=sizeof( nonce );
+
+    /* write extension type */
+    MBEDTLS_PUT_UINT16_BE( MBEDTLS_TLS_EXT_EVIDENCE_PROPOSAL, start, 0 );
+
+    /* write extension data length */
+    MBEDTLS_PUT_UINT16_BE( 4 + sizeof( nonce ), start, 2 );
+
+    *olen = 8 + sizeof( nonce );
 
     return( 0 );
 }
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_ECDH_C)
 /*
@@ -820,27 +782,22 @@ static int ssl_tls13_parse_client_hello( mbedtls_ssl_context *ssl,
                 break;
 #endif /* MBEDTLS_ECDH_C */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-            case MBEDTLS_TLS_EXT_CLI_CERT_TYPE:
-                MBEDTLS_SSL_DEBUG_MSG( 3, ( "found client certificate types extension" ) );
 
-                /* Client Certificate Types Extension
-                 *
-                 * The client_certificate_type extension in the client hello indicates
-                 * the certificate types the client is able to provide to the server,
-                 * when requested using a certificate_request message.
-                 */
-                ret = mbedtls_tls13_parse_client_cert_type_server_ext( ssl, p,
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+            case MBEDTLS_TLS_EXT_EVIDENCE_PROPOSAL:
+                MBEDTLS_SSL_DEBUG_MSG( 3, ( "found evidence_proposal extension" ) );
+
+                ret = mbedtls_tls13_parse_client_evidence_proposal_server_ext( ssl, p,
                         extension_data_end );
                 if( ret != 0 )
                 {
-                    MBEDTLS_SSL_DEBUG_RET( 1, "mbedtls_tls13_parse_client_cert_type_server_ext", ret );
+                    MBEDTLS_SSL_DEBUG_RET( 1, "mbedtls_tls13_parse_client_evidence_proposal_server_ext", ret );
                     return( ret );
                 }
 
-                ssl->handshake->extensions_present |= MBEDTLS_SSL_EXT_CLI_CERT_TYPE;
+                ssl->handshake->extensions_present |= MBEDTLS_SSL_EXT_EVIDENCE_PROPOSAL;
                 break;
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_ECDH_C)
             case MBEDTLS_TLS_EXT_KEY_SHARE:
@@ -1528,12 +1485,12 @@ static int ssl_tls13_write_encrypted_extensions_body( mbedtls_ssl_context *ssl,
     p_extensions_len = p;
     p += 2;
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-    ret = ssl_tls13_write_client_cert_type_server_ext( ssl, p, end - p, &n );
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+    ret = ssl_tls13_write_evidence_proposal_server_ext( ssl, p, end - p, &n );
     if( ret != 0 )
         return( ret );
     p += n;
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
     extensions_len = ( p - p_extensions_len ) - 2;
     MBEDTLS_PUT_UINT16_BE( extensions_len, p_extensions_len, 0 );
@@ -1897,8 +1854,8 @@ int mbedtls_ssl_tls13_handshake_server_step( mbedtls_ssl_context *ssl )
             ret = mbedtls_ssl_tls13_process_certificate( ssl );
             if( ret == 0 )
             {
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
-                if( ssl->handshake->client_cert_format == MBEDTLS_TLS_CERT_TYPE_EAT &&
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+                if( ssl->handshake->client_attestation_format == MBEDTLS_TLS_ATTESTATION_TYPE_EAT &&
                     ssl->session_negotiate->client_rpk != 0 )
                 {
                     mbedtls_ssl_handshake_set_state(
@@ -1910,7 +1867,7 @@ int mbedtls_ssl_tls13_handshake_server_step( mbedtls_ssl_context *ssl )
                     mbedtls_ssl_handshake_set_state(
                         ssl, MBEDTLS_SSL_CLIENT_CERTIFICATE_VERIFY );
                 }
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
                 else
                     mbedtls_ssl_handshake_set_state(
                         ssl, MBEDTLS_SSL_CLIENT_FINISHED );

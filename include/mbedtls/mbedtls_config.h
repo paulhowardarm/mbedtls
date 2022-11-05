@@ -1657,45 +1657,20 @@
 #define MBEDTLS_SSL_SERVER_NAME_INDICATION
 
 /**
- * \def MBEDTLS_SSL_TLS_CERT_TYPE
+ * \def MBEDTLS_SSL_TLS_ATTESTATION
  *
- * Enable support for exchanging alternative credential types.
- * 
- * Comment this macro to disable support for the client and server
- * certificate type extension.
+ * Enable support for TLS attestation, as described in draft-fossati-tls-attestation
+ *
+ * Comment this macro to disable support for TLS attestation
  */
-#define MBEDTLS_SSL_TLS_CERT_TYPE
+#define MBEDTLS_SSL_TLS_ATTESTATION
 
 /**
- * \def MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT
+ * \def MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX
  *
- * Enable support for EAT as a credential type for
- * attestation.
- * 
- * Comment this macro to disable support EAT-based
- * attestation.
+ * Defines the maximum size of the nonce.
  */
-#define MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT
-
-/**
- * \def MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX
- *
- * Defines the maximum size of the nonce provided by
- * the server.
- */
-
-#define MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX   32
-
-/**
- * \def MBEDTLS_SSL_TLS_CERT_TYPE_RPK
- *
- * Enable support for raw public keys as a credential
- * type.
- * 
- * Comment this macro to disable support RPK-based
- * credentials.
- */
-#define MBEDTLS_SSL_TLS_CERT_TYPE_RPK
+#define MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX   32
 
 /**
  * \def MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH

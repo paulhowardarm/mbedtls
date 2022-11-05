@@ -783,10 +783,10 @@
 #endif
 
 
-#if defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)            &&                 \
-    defined(MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX) &&                 \
-    MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX > 255
-#error "MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX too large (max 255)"
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)            &&                 \
+    defined(MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX) &&                 \
+    MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX > 255
+#error "MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX too large (max 255)"
 #endif
 
 #if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) &&                              \

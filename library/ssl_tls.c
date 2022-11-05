@@ -1247,7 +1247,7 @@ void mbedtls_ssl_conf_verify( mbedtls_ssl_config *conf,
 }
 #endif /* MBEDTLS_X509_CRT_PARSE_C */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 void mbedtls_ssl_conf_attestation_verify( mbedtls_ssl_config *conf,
                      int (*a_vrfy)(void *, uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t *),
                      void *ap_vrfy )
@@ -1255,7 +1255,7 @@ void mbedtls_ssl_conf_attestation_verify( mbedtls_ssl_config *conf,
     conf->a_vrfy      = a_vrfy;
     conf->ap_vrfy     = ap_vrfy;
 }
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 void mbedtls_ssl_conf_rng( mbedtls_ssl_config *conf,
                   int (*f_rng)(void *, unsigned char *, size_t),
@@ -2071,11 +2071,11 @@ void mbedtls_ssl_conf_sig_algs( mbedtls_ssl_config *conf,
 }
 #endif /* MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-void mbedtls_ssl_conf_client_cert_type( mbedtls_ssl_config *conf,
-                              const uint8_t *client_cert_type_list )
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+void mbedtls_ssl_conf_client_attestation_type( mbedtls_ssl_config *conf,
+                              const uint16_t *client_attestation_type_list )
 {
-    conf->client_cert_type_list = client_cert_type_list;
+    conf->client_attestation_type_list = client_attestation_type_list;
 }
 
 #if defined(MBEDTLS_PSA_CRYPTO_C)
@@ -2085,7 +2085,7 @@ void mbedtls_ssl_conf_client_rpk( mbedtls_ssl_config *conf,
     conf->client_rpk = key_handle;
 }
 #endif /* MBEDTLS_PSA_CRYPTO_C */
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_ECP_C)
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
@@ -2175,14 +2175,14 @@ void mbedtls_ssl_conf_sni( mbedtls_ssl_config *conf,
 }
 #endif /* MBEDTLS_SSL_SERVER_NAME_INDICATION */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 void mbedtls_ssl_conf_attestation_nonce( mbedtls_ssl_config *conf,
                   int (*f_nonce)(void *, mbedtls_ssl_context *,
                                  uint8_t *, size_t *))
 {
     conf->f_attestation_nonce = f_nonce;
 }
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 
 #if defined(MBEDTLS_SSL_ALPN)

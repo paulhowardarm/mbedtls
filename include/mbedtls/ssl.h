@@ -211,15 +211,10 @@
 #define MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE8192     0x0104
 
 /*
- * TLS Certificate Types
+ * Attestation Types
  */
-#define MBEDTLS_TLS_CERT_TYPE_X509      0   /**< X.509 format */
-#define MBEDTLS_TLS_CERT_TYPE_OpenPGP   1   /**< OpenPGP format */
-#define MBEDTLS_TLS_CERT_TYPE_RPK       2   /**< Raw Public Key format */
-#define MBEDTLS_TLS_CERT_TYPE_1609Dot2  3   /**< IEEE 1609.2 format */
-#define MBEDTLS_TLS_CERT_TYPE_CWT       4   /**< CWT format. */
-#define MBEDTLS_TLS_CERT_TYPE_EAT       5   /**< EAT format. */
-#define MBEDTLS_TLS_CERT_TYPE_NONE    255   /**< Dummy format. */
+#define MBEDTLS_TLS_ATTESTATION_TYPE_NONE    0   /**< Dummy format. */
+#define MBEDTLS_TLS_ATTESTATION_TYPE_EAT     1   /**< EAT format */
 
 /*
  * TLS 1.3 Key Exchange Modes
@@ -561,6 +556,9 @@
 #define MBEDTLS_TLS_EXT_POST_HANDSHAKE_AUTH         49 /* RFC 8446 TLS 1.3 */
 #define MBEDTLS_TLS_EXT_SIG_ALG_CERT                50 /* RFC 8446 TLS 1.3 */
 #define MBEDTLS_TLS_EXT_KEY_SHARE                   51 /* RFC 8446 TLS 1.3 */
+
+/* Evidence proposal extension as defined in draft-fossati-tls-attestation */
+#define MBEDTLS_TLS_EXT_EVIDENCE_PROPOSAL          100 /* experimental */
 
 /* The value of the CID extension is still TBD as of
  * draft-ietf-tls-dtls-connection-id-05
@@ -1152,14 +1150,17 @@ struct mbedtls_ssl_session
     unsigned char MBEDTLS_PRIVATE(id)[32];       /*!< session identifier */
     unsigned char MBEDTLS_PRIVATE(master)[48];   /*!< the master secret  */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
-    uint8_t srv_nonce[MBEDTLS_SSL_ATTESTATION_NONCE_SERVER_LEN_MAX];
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+    uint8_t srv_nonce[MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX];
     size_t srv_nonce_len;
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+    /* TBD: Not yet used. */
+    uint8_t cli_nonce[MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX];
+    size_t cli_nonce_len;
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
-#if defined(MBEDTLS_PSA_CRYPTO_C) && defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+#if defined(MBEDTLS_PSA_CRYPTO_C) && defined(MBEDTLS_SSL_TLS_ATTESTATION)
     psa_key_handle_t MBEDTLS_PRIVATE(client_rpk); /*!< client rpk */
-#endif /* MBEDTLS_PSA_CRYPTO_C && MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_PSA_CRYPTO_C && MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_X509_CRT_PARSE_C)
 #if defined(MBEDTLS_SSL_KEEP_PEER_CERTIFICATE)
@@ -1367,17 +1368,17 @@ struct mbedtls_ssl_config
     void *MBEDTLS_PRIVATE(p_vrfy);                   /*!< context for X.509 verify calllback */
 #endif
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     /** Callback to attestation verification          */
     int (*MBEDTLS_PRIVATE(a_vrfy))(void *, uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t *);
     void *MBEDTLS_PRIVATE(ap_vrfy);                   /*!< context for attestation verify calllback */
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     /** Callback to attestation nonce                 */
     int (*MBEDTLS_PRIVATE(f_attestation_nonce))(void *, mbedtls_ssl_context *,
                                  uint8_t *, size_t *);
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED)
     /** Callback to retrieve PSK key from identity                          */
@@ -1484,12 +1485,12 @@ struct mbedtls_ssl_config
     const char **MBEDTLS_PRIVATE(alpn_list);         /*!< ordered list of protocols          */
 #endif
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-    const uint8_t *MBEDTLS_PRIVATE(client_cert_type_list); /*!< client certificate types */
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+    const uint16_t *MBEDTLS_PRIVATE(client_attestation_type_list); /*!< client attestation types */
 #if defined(MBEDTLS_PSA_CRYPTO_C)
     const psa_key_handle_t *MBEDTLS_PRIVATE(client_rpk); /*!< client rpk */
 #endif /* MBEDTLS_PSA_CRYPTO_C */
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_SSL_DTLS_SRTP)
     /*! ordered list of supported srtp profile */
@@ -1913,7 +1914,7 @@ void mbedtls_ssl_conf_verify( mbedtls_ssl_config *conf,
                      void *p_vrfy );
 #endif /* MBEDTLS_X509_CRT_PARSE_C */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 /**
  * \brief          Set the verification callback for attestation (Optional).
  *
@@ -1929,7 +1930,7 @@ void mbedtls_ssl_conf_attestation_verify( mbedtls_ssl_config *conf,
                      uint8_t *, size_t, uint8_t *, size_t *),
                      void *p_vrfy );
 
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 
 /**
@@ -3582,16 +3583,17 @@ void MBEDTLS_DEPRECATED mbedtls_ssl_conf_curves( mbedtls_ssl_config *conf,
 void mbedtls_ssl_conf_groups( mbedtls_ssl_config *conf,
                               const uint16_t *groups );
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 /**
- * \brief          Set the allowed client certificate types in order of preference.
+ * \brief          Set the allowed client attestation types in order of preference.
  *
  * \param conf     SSL configuration
- * \param groups   List of allowed client certificate types ordered by preference,
- *                 terminated by MBEDTLS_TLS_CERT_TYPE_NONE.
+ * \param groups   List of allowed client attestation types ordered by preference,
+ *                 terminated by MBEDTLS_TLS_ATTESTATION_TYPE_NONE.
  */
-void mbedtls_ssl_conf_client_cert_type( mbedtls_ssl_config *conf,
-                              const uint8_t *client_cert_type_list );
+void mbedtls_ssl_conf_client_attestation_type( mbedtls_ssl_config *conf,
+                              const uint16_t *client_cert_type_list );
+
 
 #if defined(MBEDTLS_PSA_CRYPTO_C)
 /**
@@ -3603,7 +3605,7 @@ void mbedtls_ssl_conf_client_cert_type( mbedtls_ssl_config *conf,
 void mbedtls_ssl_conf_client_rpk( mbedtls_ssl_config *conf,
                               const psa_key_handle_t *key_handle );
 #endif /* MBEDTLS_PSA_CRYPTO_C */
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 
 #if defined(MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED)
@@ -3653,19 +3655,6 @@ void MBEDTLS_DEPRECATED mbedtls_ssl_conf_sig_hashes( mbedtls_ssl_config *conf,
 void mbedtls_ssl_conf_sig_algs( mbedtls_ssl_config *conf,
                                 const uint16_t* sig_algs );
 #endif /* MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED */
-
-
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-/*
- * \brief          Set client certificate types
- *
- * \param ssl                    SSL context
- * \param client_cert_type_list  list pf client certificate types
- *
- */
-void mbedtls_ssl_conf_client_cert_type( mbedtls_ssl_config *conf,
-                              const uint8_t *client_cert_type_list );
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE */
 
 
 #if defined(MBEDTLS_X509_CRT_PARSE_C)
@@ -3787,11 +3776,11 @@ void mbedtls_ssl_conf_sni( mbedtls_ssl_config *conf,
                   void *p_sni );
 #endif /* MBEDTLS_SSL_SERVER_NAME_INDICATION */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 void mbedtls_ssl_conf_attestation_nonce( mbedtls_ssl_config *conf,
                   int (*f_nonce)(void *, mbedtls_ssl_context *,
                                  uint8_t *, size_t *));
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
 /**

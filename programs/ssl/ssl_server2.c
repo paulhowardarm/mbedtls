@@ -61,10 +61,10 @@ int main( void )
 #define SNI_OPTION
 #endif
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 #include "t_cose/t_cose_common.h"
 #include "mbedtls/eat.h"
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 
 #if defined(_WIN32)
@@ -617,9 +617,9 @@ struct options
 #if defined(MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK)
     int ca_callback;            /* Use callback for trusted certificate list */
 #endif
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     int attestation_cb;         /* Use callback for attestation             */
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
     const char *psk;            /* the pre-shared key                       */
     const char *psk_identity;   /* the pre-shared key identity              */
     char *psk_list;             /* list of PSK id/key pairs for callback    */
@@ -705,6 +705,7 @@ static int get_auth_mode( const char *s )
     return( -1 );
 }
 
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 static int my_nonce(void *data, mbedtls_ssl_context *context,
                     uint8_t *nonce, size_t *nonce_size)
 {
@@ -714,45 +715,53 @@ static int my_nonce(void *data, mbedtls_ssl_context *context,
 
     /* TBD: Fetch nonce from Veraison */
     memcpy( nonce, tmp, sizeof( tmp ) );
-    *nonce_size = 3;
+    *nonce_size = sizeof( tmp );
 
     return( 0 );
 }
+
 /*
  * Verification callback function used for attestation
  */
 static int my_verify( void *data,
-                      uint8_t *attestation_token, size_t attestation_token_size,
-                      uint8_t *challenge, size_t challenge_length,
-                      uint8_t *public_key, size_t *public_key_size)
+                      uint8_t *kat_bundle, size_t kat_bundle_len,
+                      uint8_t *nonce, size_t nonce_len,
+                      uint8_t *ik_pub, size_t *ik_pub_len)
 {
     int ret = 0;
-    struct t_cose_key key_pair;
+    struct t_cose_key pak;
+    struct t_cose_key kak;
     psa_status_t status;
-    psa_key_handle_t key_handle = 0;
  
     ((void) data);
 
-    mbedtls_printf( "\nVerification of attestation requested: %d\n", attestation_token_size );
+    mbedtls_printf( "\nVerification of KAT-Bundle requested: %d\n", kat_bundle_len );
 
-    status = parsec_create_key(T_COSE_ALGORITHM_ES256, &key_handle);
+    status = fetch_key(EAT_KEY_TYPE_PAK, T_COSE_ALGORITHM_ES256, &pak);
 
     if( status != PSA_SUCCESS )
         return( -1 );
 
-    key_pair.crypto_lib = T_COSE_CRYPTO_LIB_PSA;
-    key_pair.k.key_handle = key_handle;
+    status = fetch_key(EAT_KEY_TYPE_KAK, T_COSE_ALGORITHM_ES256, &kak);
+
+    if( status != PSA_SUCCESS ) {
+        psa_close_key( (psa_key_handle_t) pak.k.key_handle);
+        return( -1 );
+    }
 
     /* Here we would do a call to Veraison */
-    ret = verify_cwt( attestation_token, attestation_token_size,
-                      challenge, challenge_length,
-                      &key_pair,
-                      public_key, public_key_size);
+    ret = verify_kat_bundle( kat_bundle, kat_bundle_len,
+                      nonce, nonce_len,
+                      &pak,
+                      &kak,
+                      ik_pub, *ik_pub_len, ik_pub_len);
 
-    psa_close_key(key_handle);
+    psa_close_key( (psa_key_handle_t) pak.k.key_handle);
+    psa_close_key( (psa_key_handle_t) kak.k.key_handle);
 
     return( ret );
 }
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 /*
  * Used by sni_parse and psk_parse to handle comma-separated lists
@@ -1638,9 +1647,9 @@ int main( int argc, char *argv[] )
 #if defined(MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK)
     opt.ca_callback         = DFL_CA_CALLBACK;
 #endif
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     opt.attestation_cb      = DFL_ATTESTATION_CALLBACK;
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
     opt.psk_identity        = DFL_PSK_IDENTITY;
     opt.psk_list            = DFL_PSK_LIST;
     opt.ecjpake_pw          = DFL_ECJPAKE_PW;
@@ -1829,10 +1838,10 @@ int main( int argc, char *argv[] )
         else if( strcmp( p, "ca_callback" ) == 0)
             opt.ca_callback = atoi( q );
 #endif
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
         else if( strcmp( p, "attestation_callback" ) == 0)
             opt.attestation_cb = atoi( q );
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
         else if( strcmp( p, "psk_identity" ) == 0 )
             opt.psk_identity = q;
         else if( strcmp( p, "psk_list" ) == 0 )
@@ -3107,13 +3116,13 @@ int main( int argc, char *argv[] )
 #endif /* MBEDTLS_SSL_ASYNC_PRIVATE */
 #endif /* MBEDTLS_X509_CRT_PARSE_C */
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     /* TBD: Configuring the attestation callback has to be mandatory for use of EAT */
     if( opt.attestation_cb == 1 ) {
         mbedtls_ssl_conf_attestation_verify( &conf, my_verify, NULL );
         mbedtls_ssl_conf_attestation_nonce( &conf, my_nonce);
     }
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #if defined(SNI_OPTION)
     if( opt.sni != NULL )

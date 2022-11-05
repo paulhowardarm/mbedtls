@@ -100,6 +100,8 @@
 #define MBEDTLS_SSL_EXT_POST_HANDSHAKE_AUTH         ( 1 << 19 )
 #define MBEDTLS_SSL_EXT_SIG_ALG_CERT                ( 1 << 20 )
 #define MBEDTLS_SSL_EXT_KEY_SHARE                   ( 1 << 21 )
+#define MBEDTLS_SSL_EXT_EVIDENCE_REQUEST            ( 1 << 22 ) /* EXPERIMENTAL ASSIGNMENT */
+#define MBEDTLS_SSL_EXT_EVIDENCE_PROPOSAL           ( 1 << 23 ) /* EXPERIMENTAL ASSIGNMENT */
 
 /*
  * Helper macros for function call with return check.
@@ -607,8 +609,8 @@ struct mbedtls_ssl_handshake_params
     mbedtls_dhm_context dhm_ctx;                /*!<  DHM key exchange        */
 #endif
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE)
-   uint8_t client_cert_format;                 /*!<  client certificate format        */
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+   uint16_t client_attestation_format;                 /*!<  client attestation format        */
 #endif
 
 /* Adding guard for MBEDTLS_ECDSA_C to ensure no compile errors due
@@ -1771,9 +1773,9 @@ int mbedtls_ssl_tls13_write_certificate( mbedtls_ssl_context *ssl );
  */
 int mbedtls_ssl_tls13_write_certificate_verify( mbedtls_ssl_context *ssl );
 
-#if defined(MBEDTLS_SSL_TLS_CERT_TYPE) && defined(MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT)
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 int mbedtls_ssl_tls13_write_certificate_verify_eat( mbedtls_ssl_context *ssl );
-#endif /* MBEDTLS_SSL_TLS_CERT_TYPE && MBEDTLS_SSL_TLS_CERT_ATTESTATION_EAT */
+#endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #endif /* MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED */
 
