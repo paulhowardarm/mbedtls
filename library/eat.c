@@ -7,8 +7,8 @@
  *
  * See BSD-3-Clause license in README.md
  */
-#include "ctoken_encode.h"
-#include "ctoken_decode.h"
+#include "ctoken/ctoken_encode.h"
+#include "ctoken/ctoken_decode.h"
 
 #include "mbedtls/eat.h"
 
