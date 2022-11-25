@@ -94,6 +94,7 @@ OBJS_CRYPTO= \
 	     ctr_drbg.o \
 	     des.o \
 	     dhm.o \
+	     eat.o \
 	     ecdh.o \
 	     ecdsa.o \
 	     ecjpake.o \
