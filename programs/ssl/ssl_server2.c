@@ -64,6 +64,8 @@ int main( void )
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 #include "t_cose/t_cose_common.h"
 #include "mbedtls/eat.h"
+#include "veraison/veraison_client_wrapper.h"
+#include "ear.h"
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 
@@ -150,6 +152,8 @@ int main( void )
 #define DFL_EXTENDED_MS_ENFORCE -1
 #define DFL_CA_CALLBACK         0
 #define DFL_ATTESTATION_CALLBACK 0
+#define DFL_NONCE_SIZE          8
+#define DFL_VERAISON_ENDPOINT   "http://localhost:8080/challenge-response/v1/"
 #define DFL_EAP_TLS             0
 #define DFL_REPRODUCIBLE        0
 #define DFL_NSS_KEYLOG          0
@@ -584,6 +588,11 @@ int main( void )
 /* This is global so it can be easily accessed by callback functions */
 rng_context_t rng;
 
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+/* Veraison verification context pointer is global for callback access. */
+ChallengeResponseSession *veraison_challenge_response_session;
+#endif
+
 /*
  * global options
  */
@@ -619,6 +628,8 @@ struct options
 #endif
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     int attestation_cb;         /* Use callback for attestation             */
+    int nonce_size;             /* The size, in bytes, of the nonce to use for attestations. */
+    const char *veraison_endpoint; /* The URL to the Veraison challenge-response endpoint. */
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
     const char *psk;            /* the pre-shared key                       */
     const char *psk_identity;   /* the pre-shared key identity              */
@@ -709,13 +720,25 @@ static int get_auth_mode( const char *s )
 static int my_nonce(void *data, mbedtls_ssl_context *context,
                     uint8_t *nonce, size_t *nonce_size)
 {
-    uint8_t tmp[] = { NONCE_TEST_VALUE };
+    /* Open the verifier session and get the nonce. */
+    VeraisonResult vresult = open_challenge_response_session( opt.veraison_endpoint,
+                                                              opt.nonce_size,
+                                                              /* NULL means Veraison decides the nonce. */
+                                                              NULL,
+                                                              &veraison_challenge_response_session );
+
+    if (vresult != Ok) {
+        mbedtls_printf( "  Failed to establish session with Veraison service at %s. Error code = %d.",
+                        opt.veraison_endpoint,
+                        vresult );
+        return -1;
+    }
 
     ((void) data);
+    ((void) context);
 
-    /* TBD: Fetch nonce from Veraison */
-    memcpy( nonce, tmp, sizeof( tmp ) );
-    *nonce_size = sizeof( tmp );
+    memcpy( nonce, veraison_challenge_response_session->nonce, veraison_challenge_response_session->nonce_size );
+    *nonce_size = veraison_challenge_response_session->nonce_size;
 
     return( 0 );
 }
@@ -728,17 +751,134 @@ static int my_verify( void *data,
                       uint8_t *nonce, size_t nonce_len,
                       uint8_t *ik_pub, size_t *ik_pub_len)
 {
-    int ret = 0; 
+    VeraisonResult vresult;
+    int earstatus;
+    ear_t *ear = NULL;
+    char ear_error_buffer[ EAR_ERR_SZ ] = { 0 };
+    ear_tier_t tier = { 0 };
+    uint8_t *p_ak_pub = NULL;
+    size_t sz_ak_pub = 0;
+
+    /* TBD: This should be the public key from the trust relationship with the verifier service.
+       Currently using a hard-coded key that matches the mocked data. */
+    uint8_t veraison_pubkey[] = {
+        0x2d, 0x2d, 0x2d, 0x2d, 0x2d, 0x42, 0x45, 0x47, 0x49, 0x4e, 0x20, 0x50,
+        0x55, 0x42, 0x4c, 0x49, 0x43, 0x20, 0x4b, 0x45, 0x59, 0x2d, 0x2d, 0x2d,
+        0x2d, 0x2d, 0x0a, 0x4d, 0x46, 0x6b, 0x77, 0x45, 0x77, 0x59, 0x48, 0x4b,
+        0x6f, 0x5a, 0x49, 0x7a, 0x6a, 0x30, 0x43, 0x41, 0x51, 0x59, 0x49, 0x4b,
+        0x6f, 0x5a, 0x49, 0x7a, 0x6a, 0x30, 0x44, 0x41, 0x51, 0x63, 0x44, 0x51,
+        0x67, 0x41, 0x45, 0x75, 0x73, 0x57, 0x78, 0x48, 0x4b, 0x32, 0x50, 0x6d,
+        0x66, 0x6e, 0x48, 0x4b, 0x77, 0x58, 0x50, 0x53, 0x35, 0x34, 0x6d, 0x30,
+        0x6b, 0x54, 0x63, 0x47, 0x4a, 0x39, 0x30, 0x0a, 0x55, 0x69, 0x67, 0x6c,
+        0x57, 0x69, 0x47, 0x61, 0x68, 0x74, 0x61, 0x67, 0x6e, 0x76, 0x38, 0x67,
+        0x45, 0x34, 0x76, 0x34, 0x4c, 0x63, 0x47, 0x32, 0x31, 0x57, 0x4b, 0x2b,
+        0x44, 0x36, 0x56, 0x4b, 0x74, 0x34, 0x42, 0x4b, 0x4f, 0x6d, 0x53, 0x32,
+        0x31, 0x79, 0x7a, 0x50, 0x37, 0x57, 0x74, 0x76, 0x74, 0x75, 0x30, 0x6f,
+        0x75, 0x2f, 0x77, 0x52, 0x66, 0x67, 0x3d, 0x3d, 0x0a, 0x2d, 0x2d, 0x2d,
+        0x2d, 0x2d, 0x45, 0x4e, 0x44, 0x20, 0x50, 0x55, 0x42, 0x4c, 0x49, 0x43,
+        0x20, 0x4b, 0x45, 0x59, 0x2d, 0x2d, 0x2d, 0x2d, 0x2d, 0x0a};
+
     ((void) data);
 
     mbedtls_printf( "\nVerification of KAT-Bundle requested\n");
 
-    /* TBD: Call to Veraison goes in here. */
-    ret = verify_kat_bundle( kat_bundle, kat_bundle_len,
-                             nonce, nonce_len,
-                             ik_pub, *ik_pub_len, ik_pub_len);
+    if (veraison_challenge_response_session == NULL)
+    {
+        mbedtls_printf( "ERROR: Need to call Veraison service, but no session has been set up.\n");
+        return -1;
+    }
 
-    return( ret );
+    /* Call Veraison with the given evidence.
+       TBD: The current Veraison interface expects a media type, we are passing a degenerate/placeholder
+       value "cmw". The expectation is that Veraison should self-discover the media type rather than expect
+       the relying party to know it, but this requires a new Veraison entry point that has not yet been
+       defined. */
+    vresult = challenge_response( veraison_challenge_response_session,
+                                  kat_bundle_len,
+                                  kat_bundle,
+                                  "cmw" /* see comment above */ );
+
+    if ( vresult != Ok )
+    {
+        mbedtls_printf( "Veraison verification attempt failed with error code %d.", vresult);
+        return -1;
+    }
+
+    mbedtls_printf( "Veraison attestation result: %s\n", veraison_challenge_response_session->attestation_result );
+
+    earstatus = ear_jwt_verify( veraison_challenge_response_session->attestation_result,
+                                veraison_pubkey,
+                                sizeof(veraison_pubkey),
+                                "ES256", /* TBD: Use alg associated with trust relationship. */
+                                &ear,
+                                ear_error_buffer );
+
+    if ( earstatus != 0 )
+    {
+        mbedtls_printf( "Unable to process attestation result: error %d from ear_jwt_verify(). Additional messages: %s\n",
+                        earstatus,
+                        ear_error_buffer );
+        return -1;
+    }
+
+    /* We successfully processed the attestation result, but this does not by itself mean that the token is valid.
+       We now query to find out whether we have a positive verification. */
+    earstatus = ear_get_status( ear,
+                                "PARSEC_TPM",
+                                &tier,
+                                ear_error_buffer);
+
+    if ( earstatus != 0 )
+    {
+        mbedtls_printf( "Unable to process attestation result: error %d from ear_get_status(). Additional messages: %s\n",
+                        earstatus,
+                        ear_error_buffer );
+        ear_free( ear );
+        return -1;
+    }
+
+    mbedtls_printf( "PARSEC_TPM Status tier: %d\n", tier );
+    
+    /* Get the AK pub from the parsed claims. */
+    earstatus = ear_veraison_get_akpub( ear,
+                                        "PARSEC_TPM",
+                                        &p_ak_pub,
+                                        &sz_ak_pub,
+                                        ear_error_buffer );
+
+    if ( earstatus != 0 )
+    {
+        mbedtls_printf( "Unable to process attestation result: error %d from ear_veraison_get_akpub(). Additional messages: %s\n",
+                        earstatus,
+                        ear_error_buffer );
+        ear_free( ear );
+        return -1;
+    }
+
+    mbedtls_printf( "Obtained %d bytes of public key. Caller's buffer has space for %d bytes.\n" ,
+                    (int) sz_ak_pub,
+                    (int) *ik_pub_len );
+    
+    /* Copy the public key back for the caller if their buffer is allocated and big enough. */
+    if ( ik_pub != NULL && *ik_pub_len >= sz_ak_pub )
+    {
+        memcpy( ik_pub, p_ak_pub, sz_ak_pub );
+        free( p_ak_pub );
+        *ik_pub_len = sz_ak_pub;
+    }
+    else
+    {
+        /* Tell the caller how much memory is needed. */
+        free( p_ak_pub );
+        *ik_pub_len = sz_ak_pub;
+        return -1; /* TBD: Is there a special error status for buffer too small? */
+    }
+
+    /* TBD: Assume that the session is no longer needed? */
+    free_challenge_response_session( veraison_challenge_response_session );
+    veraison_challenge_response_session = NULL;
+    ear_free( ear );
+    return( 0 );
 }
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
@@ -1568,6 +1708,10 @@ int main( int argc, char *argv[] )
     signal( SIGINT, term_handler );
 #endif
 
+#if defined(MBEDTLS_SSL_TLS_ATTESTATION)
+    veraison_challenge_response_session = NULL;
+#endif
+
     if( argc == 0 )
     {
     usage:
@@ -1628,6 +1772,8 @@ int main( int argc, char *argv[] )
 #endif
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     opt.attestation_cb      = DFL_ATTESTATION_CALLBACK;
+    opt.veraison_endpoint   = DFL_VERAISON_ENDPOINT;
+    opt.nonce_size          = DFL_NONCE_SIZE;
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
     opt.psk_identity        = DFL_PSK_IDENTITY;
     opt.psk_list            = DFL_PSK_LIST;
@@ -1820,6 +1966,10 @@ int main( int argc, char *argv[] )
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
         else if( strcmp( p, "attestation_callback" ) == 0)
             opt.attestation_cb = atoi( q );
+        else if( strcmp( p, "veraison_endpoint") == 0)
+            opt.veraison_endpoint = q;
+        else if( strcmp( p, "nonce_size") == 0)
+            opt.nonce_size = atoi( q );
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
         else if( strcmp( p, "psk_identity" ) == 0 )
             opt.psk_identity = q;
@@ -3098,6 +3248,8 @@ int main( int argc, char *argv[] )
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
     /* TBD: Configuring the attestation callback has to be mandatory for use of EAT */
     if( opt.attestation_cb == 1 ) {
+        /* TBD: Both of these callbacks access the global veraison_challenge_response_session,
+           would be better if they both received a p_arg to it instead. */
         mbedtls_ssl_conf_attestation_verify( &conf, my_verify, NULL );
         mbedtls_ssl_conf_attestation_nonce( &conf, my_nonce);
     }
