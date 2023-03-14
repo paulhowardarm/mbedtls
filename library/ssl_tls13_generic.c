@@ -33,6 +33,7 @@
 #if defined(MBEDTLS_SSL_TLS_ATTESTATION)
 #include "t_cose/t_cose_common.h"
 #include "mbedtls/eat.h"
+#include "pk_wrap.h"
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
 #include "ssl_misc.h"
@@ -471,6 +472,96 @@ empty_cert:
  * TBD: Currently server-only code.
  */
 #if defined(MBEDTLS_SSL_SRV_C) && defined(MBEDTLS_SSL_TLS_ATTESTATION)
+/*
+ * Import the verified public IK as a PSA Crypto key.
+ *
+ * TBD: Temporary function pending creation of an official PSA Crypto API.
+ * See: https://github.com/ARM-software/psa-api/issues/44 
+ * 
+ * The input buffer is supported as a DER SubjectPublicKeyInfo encoding.
+ * 
+ * On success, `key` receives the ID of the imported key.
+ * 
+ */
+static int ssl_tls13_import_ik_pub( mbedtls_ssl_context *ssl,
+                                    unsigned char *buf,
+                                    size_t len,
+                                    mbedtls_svc_key_id_t *key )
+{
+    mbedtls_pk_context pk;
+    int ret;
+
+    mbedtls_pk_init( &pk );
+
+    ret = mbedtls_pk_parse_subpubkey( &buf, buf + len, &pk );
+
+    if ( ret != 0 )
+    {
+        MBEDTLS_SSL_DEBUG_MSG( 1, ( "Failed to parse public IK as SubjectPublicKeyInfo" ) );
+        goto cleanup;
+    }
+
+    MBEDTLS_SSL_DEBUG_MSG( 1, ( "Created PK context from SubjectPublicKeyInfo" ) );
+
+    if ( mbedtls_pk_get_type( &pk ) == MBEDTLS_PK_ECKEY )
+    {
+        const mbedtls_ecp_keypair *ec;
+        unsigned char q[MBEDTLS_ECP_MAX_BYTES];
+        size_t q_len;
+        psa_ecc_family_t curve_id;
+        psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+        psa_key_type_t key_type;
+        size_t bits;
+        int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+        psa_status_t status;
+
+        MBEDTLS_SSL_DEBUG_MSG( 1, ( "IK pub is EC key. Assuming ECDSA with SHA256." ) );
+
+        /* export the public key material in the format PSA wants */
+        ec = mbedtls_pk_ec( pk );
+        if( ( ret = mbedtls_ecp_point_write_binary( &ec->grp,
+                                                    &ec->Q,
+                                                    MBEDTLS_ECP_PF_UNCOMPRESSED,
+                                                    &q_len,
+                                                    q,
+                                                    MBEDTLS_ECP_MAX_BYTES ) ) != 0 )
+            goto cleanup;
+
+        curve_id = mbedtls_ecc_group_to_psa( ec->grp.id, &bits );
+        key_type = PSA_KEY_TYPE_ECC_PUBLIC_KEY( curve_id );
+
+        /* prepare the key attributes */
+        psa_set_key_type( &attributes, key_type );
+        psa_set_key_bits( &attributes, bits );
+        psa_set_key_usage_flags( &attributes, PSA_KEY_USAGE_VERIFY_HASH );
+
+        /* TBD - how should we know what the algorithm is? */
+        psa_set_key_algorithm( &attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256) );
+
+        /* import public key into PSA */
+        status = psa_import_key( &attributes, q, q_len, key );
+        if( status != PSA_SUCCESS ) 
+        {
+            ret = mbedtls_pk_error_from_psa( status );
+            goto cleanup;
+        }
+    }
+    else if ( mbedtls_pk_get_type( &pk ) == MBEDTLS_PK_RSA )
+    {
+        MBEDTLS_SSL_DEBUG_MSG( 1, ( "RSA key not supported for IK pub." ) );
+        ret = MBEDTLS_ERR_PK_INVALID_ALG;
+    }
+    else
+    {
+        MBEDTLS_SSL_DEBUG_MSG( 1, ( "Unsupported key type for IK pub." ) );
+        ret = MBEDTLS_ERR_PK_UNKNOWN_PK_ALG;
+    }
+                                     
+cleanup:
+    mbedtls_pk_free( &pk );
+    return ret;
+}
+
 static int ssl_tls13_parse_eat( mbedtls_ssl_context *ssl,
                                 unsigned char const *buf,
                                 unsigned char const *end )
@@ -484,9 +575,6 @@ static int ssl_tls13_parse_eat( mbedtls_ssl_context *ssl,
     size_t nonce_len = MBEDTLS_SSL_ATTESTATION_NONCE_LEN_MAX;
     uint8_t crt[1200]={0};
     size_t crt_len=sizeof(crt);
-    psa_status_t status;
-    psa_key_handle_t key_handle = 0;
-    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
 
     MBEDTLS_SSL_CHK_BUF_READ_PTR( p, end, 1 );
     certificate_request_context_len = p[0];
@@ -574,13 +662,13 @@ static int ssl_tls13_parse_eat( mbedtls_ssl_context *ssl,
             return( MBEDTLS_ERR_SSL_DECODE_ERROR );
         }
 
-        psa_set_key_usage_flags( &attributes, PSA_KEY_USAGE_VERIFY_HASH );
-        psa_set_key_algorithm( &attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256) );
-        psa_set_key_type( &attributes, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1) );
-
-        status = psa_import_key( &attributes, crt, crt_len, &ssl->session_negotiate->client_rpk );
-        if( status != PSA_SUCCESS )
-            return( psa_ssl_status_to_mbedtls( status ) );
+        ret = ssl_tls13_import_ik_pub( ssl, crt, crt_len, &ssl->session_negotiate->client_rpk );
+        
+        if( ret != 0 )
+        {
+            MBEDTLS_SSL_DEBUG_MSG( 1, ( "Failed to import IK public key." ) );
+            return ret;
+        }
 
         p += cert_data_len;
 
