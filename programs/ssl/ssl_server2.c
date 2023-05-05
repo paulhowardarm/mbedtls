@@ -153,7 +153,7 @@ int main( void )
 #define DFL_CA_CALLBACK         0
 #define DFL_ATTESTATION_CALLBACK 0
 #define DFL_NONCE_SIZE          8
-#define DFL_VERAISON_ENDPOINT   "http://localhost:8080/challenge-response/v1/"
+#define DFL_VERAISON_ENDPOINT   "http://localhost:8080"
 #define DFL_EAP_TLS             0
 #define DFL_REPRODUCIBLE        0
 #define DFL_NSS_KEYLOG          0
@@ -720,16 +720,60 @@ static int get_auth_mode( const char *s )
 static int my_nonce(void *data, mbedtls_ssl_context *context,
                     uint8_t *nonce, size_t *nonce_size)
 {
+    VeraisonVerificationApi *p_api = NULL;
+    VeraisonResult vresult;
+    char new_session_endpoint[ PATH_MAX ] = { 0 };
+    size_t i;
+
+    mbedtls_printf( "\nAttestation nonce requested\n" );
+
+    /* Get the verification API details from the configured Veraison endpoint. */
+    vresult = veraison_get_verification_api( opt.veraison_endpoint, &p_api );
+
+    if ( vresult != Ok )
+    {
+        mbedtls_printf( "\n  Failed to obtain Veraison discovery API details from %s. Error code = %d.\n",
+                        opt.veraison_endpoint,
+                        vresult );
+        return -1;
+    }
+
+    /* Search the individual API endpoints, and capture the "newChallengeResponseSession"
+       endpoint, which will be used in the next step. */
+    for ( i = 0; i < p_api->endpoint_count; i++  )
+    {
+        if ( strcmp( p_api->endpoint_list[ i ].name, "newChallengeResponseSession" ) == 0 )
+        {
+            // This is the endpoint that we want to use to make a challenge-response session,
+            // so concatenate this with the base_url.
+            snprintf( new_session_endpoint,
+                      sizeof( new_session_endpoint ),
+                      "%s%s",
+                      opt.veraison_endpoint,
+                      p_api->endpoint_list[ i ].path );
+        }
+    }
+
+    /* We can free the endpoint descriptions now. */
+    veraison_free_verification_api( p_api );
+    
+    /* Fail if we don't have a challenge-response newSession endpoint. */
+    if ( strlen( new_session_endpoint ) == 0 )
+    {
+        mbedtls_printf( "\n  Failed to obtain any challenge-response endpoint from the verifier.\n");
+        return -1;
+    }
+
     /* Open the verifier session and get the nonce. */
-    VeraisonResult vresult = open_challenge_response_session( opt.veraison_endpoint,
-                                                              opt.nonce_size,
-                                                              /* NULL means Veraison decides the nonce. */
-                                                              NULL,
-                                                              &veraison_challenge_response_session );
+    vresult = open_challenge_response_session( new_session_endpoint,
+                                               opt.nonce_size,
+                                               /* NULL means Veraison decides the nonce. */
+                                               NULL,
+                                               &veraison_challenge_response_session );
 
     if (vresult != Ok) {
-        mbedtls_printf( "  Failed to establish session with Veraison service at %s. Error code = %d.",
-                        opt.veraison_endpoint,
+        mbedtls_printf( "\n  Failed to establish session with Veraison service at %s. Error code = %d.\n",
+                        new_session_endpoint,
                         vresult );
         return -1;
     }
