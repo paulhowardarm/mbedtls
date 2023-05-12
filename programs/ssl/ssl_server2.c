@@ -824,15 +824,11 @@ static int my_verify( void *data,
         return -1;
     }
 
-    /* Call Veraison with the given evidence.
-       TBD: The current Veraison interface expects a media type, we are passing a degenerate/placeholder
-       value "cmw". The expectation is that Veraison should self-discover the media type rather than expect
-       the relying party to know it, but this requires a new Veraison entry point that has not yet been
-       defined. */
+    /* Call the Veraison challenge response session with the given evidence. */
     vresult = challenge_response( veraison_challenge_response_session,
                                   kat_bundle_len,
                                   kat_bundle,
-                                  "cmw" /* see comment above */ );
+                                  "application/cmw" );
 
     if ( vresult != Ok )
     {
