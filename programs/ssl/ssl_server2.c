@@ -795,6 +795,7 @@ static int my_verify( void *data,
                       uint8_t *nonce, size_t nonce_len,
                       uint8_t *ik_pub, size_t *ik_pub_len)
 {
+    int retval = 0;
     VeraisonResult vresult;
     int earstatus;
     ear_t *ear = NULL;
@@ -802,6 +803,8 @@ static int my_verify( void *data,
     ear_tier_t tier = { 0 };
     uint8_t *p_ak_pub = NULL;
     size_t sz_ak_pub = 0;
+    const char **app_rec_list = NULL;
+    size_t app_rec_count = 0;
     VeraisonVerificationApi *p_api = NULL;
 
     ((void) data);
@@ -811,7 +814,8 @@ static int my_verify( void *data,
     if (veraison_challenge_response_session == NULL)
     {
         mbedtls_printf( "ERROR: Need to call Veraison service, but no session has been set up.\n");
-        return -1;
+        retval = -1;
+        goto end;
     }
 
     /* Get the characteristics of the Veraison verification service. This includes the public key against which we need
@@ -821,7 +825,8 @@ static int my_verify( void *data,
     if ( vresult != Ok )
     {
         mbedtls_printf( "Attempt to query Veraison verification API details failed with error code %d.", vresult );
-        return -1;
+        retval = -1;
+        goto end;
     }
 
     /* Call the Veraison challenge response session with the given evidence. */
@@ -833,7 +838,8 @@ static int my_verify( void *data,
     if ( vresult != Ok )
     {
         mbedtls_printf( "Veraison verification attempt failed with error code %d.", vresult);
-        return -1;
+        retval = -1;
+        goto end;
     }
 
     mbedtls_printf( "Veraison attestation result: %s\n", veraison_challenge_response_session->attestation_result );
@@ -854,13 +860,32 @@ static int my_verify( void *data,
         mbedtls_printf( "Unable to process attestation result: error %d from ear_jwt_verify(). Additional messages: %s\n",
                         earstatus,
                         ear_error_buffer );
-        return -1;
+        retval = -1;
+        goto end;
+    }
+
+    /* Get the list of appraisal records - we expect only a single entry. */
+    earstatus = ear_get_app_recs( ear, &app_rec_list, &app_rec_count );
+
+    if ( earstatus != 0 )
+    {
+        mbedtls_printf( "Failed to get appraisal record list from the attestation result: error %d from ear_get_app_recs.\n",
+                        earstatus );
+        retval = -1;
+        goto end;
+    }
+
+    if ( app_rec_count != 1 )
+    {
+        mbedtls_printf( "Unexpected number of appraisal records. Expected 1, obtained %d.\n", (int) app_rec_count );
+        retval = -1;
+        goto end;
     }
 
     /* We successfully processed the attestation result, but this does not by itself mean that the token is valid.
        We now query to find out whether we have a positive verification. */
     earstatus = ear_get_status( ear,
-                                "PARSEC_TPM",
+                                app_rec_list[0],
                                 &tier,
                                 ear_error_buffer);
 
@@ -869,15 +894,23 @@ static int my_verify( void *data,
         mbedtls_printf( "Unable to process attestation result: error %d from ear_get_status(). Additional messages: %s\n",
                         earstatus,
                         ear_error_buffer );
-        ear_free( ear );
-        return -1;
+        retval = -1;
+        goto end;
     }
 
-    mbedtls_printf( "PARSEC_TPM Status tier: %d\n", tier );
+    mbedtls_printf( "%s Status tier: %d\n", app_rec_list[0], tier );
     
+    /* Fail if we don't have affirming status. */
+    if ( tier != EAR_TIER_AFFIRMING )
+    {
+        mbedtls_printf( "ATTESTATION VERIFICATION FAILED: Non-affirming tier status.\n" );
+        retval = -1;
+        goto end;
+    }
+
     /* Get the AK pub from the parsed claims. */
     earstatus = ear_veraison_get_akpub( ear,
-                                        "PARSEC_TPM",
+                                        app_rec_list[0],
                                         &p_ak_pub,
                                         &sz_ak_pub,
                                         ear_error_buffer );
@@ -887,8 +920,8 @@ static int my_verify( void *data,
         mbedtls_printf( "Unable to process attestation result: error %d from ear_veraison_get_akpub(). Additional messages: %s\n",
                         earstatus,
                         ear_error_buffer );
-        ear_free( ear );
-        return -1;
+        retval = -1;
+        goto end;
     }
 
     mbedtls_printf( "Obtained %d bytes of public key. Caller's buffer has space for %d bytes.\n" ,
@@ -899,22 +932,34 @@ static int my_verify( void *data,
     if ( ik_pub != NULL && *ik_pub_len >= sz_ak_pub )
     {
         memcpy( ik_pub, p_ak_pub, sz_ak_pub );
-        free( p_ak_pub );
         *ik_pub_len = sz_ak_pub;
     }
     else
     {
         /* Tell the caller how much memory is needed. */
-        free( p_ak_pub );
         *ik_pub_len = sz_ak_pub;
-        return -1; /* TBD: Is there a special error status for buffer too small? */
+        retval = -1; /* TBD: Is there a special error status for buffer too small? */
+        goto end;
     }
 
+end:
     /* TBD: Assume that the session is no longer needed? */
-    free_challenge_response_session( veraison_challenge_response_session );
-    veraison_challenge_response_session = NULL;
-    ear_free( ear );
-    return( 0 );
+    if ( veraison_challenge_response_session != NULL )
+    {
+        free_challenge_response_session( veraison_challenge_response_session );
+        veraison_challenge_response_session = NULL;
+    }
+
+    if ( ear != NULL )
+        ear_free( ear );
+
+    if ( p_ak_pub != NULL )
+        free( p_ak_pub );
+
+    if ( app_rec_list != NULL )
+        free( app_rec_list );
+
+    return( retval );
 }
 #endif /* MBEDTLS_SSL_TLS_ATTESTATION */
 
